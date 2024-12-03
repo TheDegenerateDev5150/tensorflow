@@ -13,21 +13,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "xla/service/gpu/fusions/triton/passes.h"
+#ifndef XLA_BACKENDS_GPU_COLLECTIVES_GPU_COLLECTIVES_H_
+#define XLA_BACKENDS_GPU_COLLECTIVES_GPU_COLLECTIVES_H_
 
-#include "llvm/ADT/STLFunctionalExtras.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/IR/Visitors.h"
+#include "xla/core/collectives/collectives.h"
 
 namespace xla::gpu {
 
-bool ContainsOp(mlir::Operation* op,
-                llvm::function_ref<bool(mlir::Operation*)> fn) {
-  auto visitor = [&](mlir::Operation* nested_op) {
-    return fn(nested_op) ? mlir::WalkResult::interrupt()
-                         : mlir::WalkResult::advance();
-  };
-  return op->walk(visitor).wasInterrupted();
-}
+// XLA:GPU extension of the Collectives interface with GPU-specific APIs.
+class GpuCollectives : public Collectives {
+ public:
+};
 
 }  // namespace xla::gpu
+
+#endif  // XLA_BACKENDS_GPU_COLLECTIVES_GPU_COLLECTIVES_H_

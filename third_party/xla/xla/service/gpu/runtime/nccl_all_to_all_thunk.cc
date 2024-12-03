@@ -27,12 +27,13 @@ limitations under the License.
 #include "absl/status/status.h"
 #include "absl/strings/substitute.h"
 #include "absl/synchronization/mutex.h"
+#include "xla/backends/gpu/collectives/gpu_clique_key.h"
+#include "xla/backends/gpu/collectives/gpu_collectives.h"
 #include "xla/core/collectives/communicator.h"
 #include "xla/hlo/ir/hlo_instruction.h"
 #include "xla/hlo/ir/hlo_instructions.h"
 #include "xla/service/collective_ops_utils.h"
 #include "xla/service/gpu/runtime/nccl_api.h"
-#include "xla/service/gpu/runtime/nccl_clique_key.h"
 #include "xla/service/gpu/runtime/nccl_collective_thunk.h"
 #include "xla/service/gpu/runtime/thunk.h"
 #include "xla/shape.h"
@@ -105,7 +106,7 @@ absl::Status NcclAllToAllStartThunk::Initialize(
   VLOG(5) << "Local device count: " << device_count_;
 
   if (is_local() && p2p_memcpy_enabled_) {
-    const NcclStreamId stream_id = nccl_stream_id();
+    const CollectiveStreamId stream_id = nccl_stream_id();
     AsyncStreamKind stream_kind = GetAsyncStreamKind();
     TF_ASSIGN_OR_RETURN(
         CommunicatorHandle comm_handle,
@@ -136,7 +137,7 @@ absl::Status NcclAllToAllStartThunk::Initialize(
 
 absl::Status NcclAllToAllStartThunk::Cleanup(const CleanupParams& params) {
   if (p2p_memcpy_enabled_) {
-    const NcclStreamId stream_id = nccl_stream_id();
+    const CollectiveStreamId stream_id = nccl_stream_id();
     AsyncStreamKind stream_kind = GetAsyncStreamKind();
     TF_ASSIGN_OR_RETURN(
         CommunicatorHandle comm_handle,
