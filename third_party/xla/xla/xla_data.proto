@@ -344,8 +344,8 @@ message ShapeProto {
   repeated bool is_dynamic_dimension = 6;
 
   // Important: if any field is added, be sure to modify ShapeUtil::Equal(),
-  // ShapeUtil::Compatible() and ShapeUtil::Hash() appropriately to account for
-  // the new field.
+  // ShapeUtil::Compatible() and Shape::Hash() appropriately to account for the
+  // new field.
 }
 // LINT.ThenChange( \
 //     https://www.tensorflow.org/code/tensorflow/compiler/xla/shape_util.cc)
@@ -1105,8 +1105,9 @@ message PrecisionConfig {
     ALG_DOT_TF32_TF32_F32_X3 = 10;
     ALG_DOT_F32_F32_F32 = 11;
     ALG_DOT_F64_F64_F64 = 12;
+    ALG_DOT_BF16_BF16_F32_X9 = 13;
 
-    // Next: 13
+    // Next: 14
   }
 
   repeated Precision operand_precision = 1;
