@@ -244,6 +244,7 @@ bool IsDotAlgorithmSupportedByTriton(
     case PrecisionConfig::ALG_DOT_BF16_BF16_F32:
     case PrecisionConfig::ALG_DOT_BF16_BF16_F32_X3:
     case PrecisionConfig::ALG_DOT_BF16_BF16_F32_X6:
+    case PrecisionConfig::ALG_DOT_BF16_BF16_F32_X9:
       if (cuda_compute_capability) {
         return true;
       }
@@ -333,10 +334,10 @@ bool NoNonContractingDimension(const HloDotInstruction& dot) {
   const DotDimensionNumbers& dim_numbers = dot.dot_dimension_numbers();
   if (dim_numbers.lhs_batch_dimensions().size() +
               dim_numbers.lhs_contracting_dimensions().size() ==
-          dot.operand(0)->shape().rank() ||
+          dot.operand(0)->shape().dimensions_size() ||
       dim_numbers.rhs_batch_dimensions().size() +
               dim_numbers.rhs_contracting_dimensions().size() ==
-          dot.operand(1)->shape().rank()) {
+          dot.operand(1)->shape().dimensions_size()) {
     return true;
   }
   return false;

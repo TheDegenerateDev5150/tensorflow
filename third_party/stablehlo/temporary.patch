@@ -1,146 +1,448 @@
-diff --ruN a/stablehlo/stablehlo/conversions/tosa/tests/unary.mlir b/stablehlo/stablehlo/conversions/tosa/tests/unary.mlir
---- stablehlo/stablehlo/conversions/tosa/tests/unary.mlir
-+++ stablehlo/stablehlo/conversions/tosa/tests/unary.mlir
-@@ -123,8 +123,7 @@
+diff --ruN a/stablehlo/BUILD.bazel b/stablehlo/BUILD.bazel
+--- stablehlo/BUILD.bazel
++++ stablehlo/BUILD.bazel
+@@ -1578,9 +1578,8 @@
+     srcs = [
+         "stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp",
+         "stablehlo/conversions/tosa/transforms/StablehloPrepareForTosa.cpp",
+-        # TODO: un-comment the following once #2751 is fixed
+-        # "stablehlo/conversions/tosa/transforms/StablehloQuantLegalizeToTosaRescale.cpp",
+-        # "stablehlo/conversions/tosa/transforms/TosaRescaleLegalizeToStablehlo.cpp",
++        "stablehlo/conversions/tosa/transforms/StablehloQuantLegalizeToTosaRescale.cpp",
++        "stablehlo/conversions/tosa/transforms/TosaRescaleLegalizeToStablehlo.cpp",
+     ],
+     hdrs = [
+         "stablehlo/conversions/tosa/transforms/Passes.h",
+diff --ruN a/stablehlo/docs/generated/stablehlo_passes.md b/stablehlo/docs/generated/stablehlo_passes.md
+--- stablehlo/docs/generated/stablehlo_passes.md
++++ stablehlo/docs/generated/stablehlo_passes.md
+@@ -466,3 +466,17 @@
+ ```
+ -target : The target version. Must be a version of the form #.#.# .
+ ```
++
++### `-stablehlo-quant-legalize-to-tosa-rescale`
++
++_Legalize StableHLO Quantized operations to TOSA rescale operations_
++
++This pass rewrites StableHLO quantized operations to integer operations
++by inserting TOSA rescale operations at the inputs and outputs of the
++integer operations.
++
++### `-tosa-rescale-legalize-to-stablehlo`
++
++_Legalize TOSA rescales to StableHlo primitive math operations_
++
++This pass rewrites TOSA rescale operations to StableHLO primitive math operations.
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/tests/BUILD.bazel b/stablehlo/stablehlo/conversions/tosa/tests/BUILD.bazel
+--- stablehlo/stablehlo/conversions/tosa/tests/BUILD.bazel
++++ stablehlo/stablehlo/conversions/tosa/tests/BUILD.bazel
+@@ -59,8 +59,6 @@
+     for src in glob(
+         ["**/*.mlir"],
+         exclude = [
+-            "legalize_quant_ops_to_tosa_rescale.mlir",
+-            "legalize_tosa_rescale_to_stablehlo.mlir",
+             "rescale_interpreter.mlir",
+             "binary.mlir",
+             "nullary.mlir",
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/tests/legalize_quant_ops_to_tosa_rescale.mlir b/stablehlo/stablehlo/conversions/tosa/tests/legalize_quant_ops_to_tosa_rescale.mlir
+--- stablehlo/stablehlo/conversions/tosa/tests/legalize_quant_ops_to_tosa_rescale.mlir
++++ stablehlo/stablehlo/conversions/tosa/tests/legalize_quant_ops_to_tosa_rescale.mlir
+@@ -4,10 +4,17 @@
+ // CHECK-LABEL: @add
+ func.func @add(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>,
+                %arg1 : tensor<2x2x!quant.uniform<i8:f32, 0.075:-1>>) -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-1>> {
+-  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 13>}
+-  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 11>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<50>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<11>
++  // CHECK-DAG: %[[SHIFT2:.+]] = "tosa.const"() <{values = dense<13>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL1]], %[[SHIFT2]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT1]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.add %[[V0]], %[[V1]] : tensor<2x2xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = -1 : i32, per_channel = false, scale32 = true, shift = array<i8: 50>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]], %[[MUL0]], %[[SHIFT0]], %[[ZP0]], %[[ZP1]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<2x2x!quant.uniform<i8:f32, 1.500000e-01:-1>>
+   %0 = "stablehlo.add"(%arg0, %arg1) : (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<2x2x!quant.uniform<i8:f32, 0.075:-1>>)
+             -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-1>>
+@@ -18,10 +25,17 @@
+ // CHECK-LABEL: @sub
+ func.func @sub(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>,
+                %arg1 : tensor<2x2x!quant.uniform<i8:f32, 0.075:-1>>) -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-1>> {
+-  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 13>}
+-  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 11>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<50>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<11>
++  // CHECK-DAG: %[[SHIFT2:.+]] = "tosa.const"() <{values = dense<13>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL1]], %[[SHIFT2]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT1]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.subtract %[[V0]], %[[V1]] : tensor<2x2xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = -1 : i32, per_channel = false, scale32 = true, shift = array<i8: 50>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]], %[[MUL0]], %[[SHIFT0]], %[[ZP0]], %[[ZP1]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<2x2x!quant.uniform<i8:f32, 1.500000e-01:-1>>
+   %0 = "stablehlo.subtract"(%arg0, %arg1) : (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<2x2x!quant.uniform<i8:f32, 0.075:-1>>)
+             -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-1>>
+@@ -32,10 +46,16 @@
+ // CHECK-LABEL: @mul
+ func.func @mul(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>,
+                %arg1 : tensor<2x2x!quant.uniform<i8:f32, 0.075:-1>>) -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-1>> {
+-  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 30>}
+-  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 30>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<30>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<37>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1717986918> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL0]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.multiply %[[V0]], %[[V1]] : tensor<2x2xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1717986918>, output_unsigned = false, output_zp = -1 : i32, per_channel = false, scale32 = true, shift = array<i8: 37>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]], %[[MUL1]], %[[SHIFT1]], %[[ZP0]], %[[ZP1]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<2x2x!quant.uniform<i8:f32, 1.500000e-01:-1>>
+   %0 = "stablehlo.multiply"(%arg0, %arg1) : (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<2x2x!quant.uniform<i8:f32, 0.075:-1>>)
+             -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-1>>
+@@ -46,10 +66,18 @@
+ // CHECK-LABEL: @div
+ func.func @div(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>,
+                %arg1 : tensor<2x2x!quant.uniform<i8:f32, 0.075:-2>>) -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-3>> {
+-  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 30>}
+-  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -2 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 30>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<30>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<37>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1717986918> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP2:.+]] = "tosa.const"() <{values = dense<-2> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP3:.+]] = "tosa.const"() <{values = dense<-3> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL0]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT0]], %[[ZP2]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.divide %[[V0]], %[[V1]] : tensor<2x2xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1717986918>, output_unsigned = false, output_zp = -3 : i32, per_channel = false, scale32 = true, shift = array<i8: 37>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]], %[[MUL1]], %[[SHIFT1]], %[[ZP0]], %[[ZP3]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<2x2x!quant.uniform<i8:f32, 1.500000e-01:-3>>
+   %0 = "stablehlo.divide"(%arg0, %arg1) : (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<2x2x!quant.uniform<i8:f32, 0.075:-2>>)
+             -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-3>>
+@@ -60,10 +88,19 @@
+ // CHECK-LABEL: @max
+ func.func @max(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>,
+                %arg1 : tensor<2x2x!quant.uniform<i8:f32, 0.075:-2>>) -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-3>> {
+-  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 12>}
+-  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -2 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 10>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<12>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<10>
++  // CHECK-DAG: %[[SHIFT2:.+]] = "tosa.const"() <{values = dense<51>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP2:.+]] = "tosa.const"() <{values = dense<-2> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP3:.+]] = "tosa.const"() <{values = dense<-3> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL1]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT1]], %[[ZP2]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.maximum %[[V0]], %[[V1]] : tensor<2x2xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = -3 : i32, per_channel = false, scale32 = true, shift = array<i8: 51>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]], %[[MUL0]], %[[SHIFT2]], %[[ZP0]], %[[ZP3]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<2x2x!quant.uniform<i8:f32, 1.500000e-01:-3>>
+   %0 = "stablehlo.maximum"(%arg0, %arg1) : (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<2x2x!quant.uniform<i8:f32, 0.075:-2>>)
+             -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-3>>
+@@ -74,10 +111,19 @@
+ // CHECK-LABEL: @min
+ func.func @min(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>,
+                %arg1 : tensor<2x2x!quant.uniform<i8:f32, 0.075:-2>>) -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-3>> {
+-  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 12>}
+-  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -2 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 10>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<12>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<10>
++  // CHECK-DAG: %[[SHIFT2:.+]] = "tosa.const"() <{values = dense<51>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP2:.+]] = "tosa.const"() <{values = dense<-2> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP3:.+]] = "tosa.const"() <{values = dense<-3> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL1]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK-DAG: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT1]], %[[ZP2]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.minimum %[[V0]], %[[V1]] : tensor<2x2xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = -3 : i32, per_channel = false, scale32 = true, shift = array<i8: 51>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V2]], %[[MUL0]], %[[SHIFT2]], %[[ZP0]], %[[ZP3]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<2x2x!quant.uniform<i8:f32, 1.500000e-01:-3>>
+   %0 = "stablehlo.minimum"(%arg0, %arg1) : (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<2x2x!quant.uniform<i8:f32, 0.075:-2>>)
+             -> tensor<2x2x!quant.uniform<i8:f32, 1.5e-01:-3>>
+@@ -87,9 +133,16 @@
+ // -----
+ // CHECK-LABEL: @abs
+ func.func @abs(%arg0 : tensor<20x20x!quant.uniform<i8:f32, 0.025:-1>>) -> tensor<20x20x!quant.uniform<i8:f32, 1.5e-01:-128>> {
+-  // CHECK: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 30>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<30>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<33>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP2:.+]] = "tosa.const"() <{values = dense<-128> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL0]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V1:.+]] = stablehlo.abs %[[V0]] : tensor<20x20xi32>
+-  // CHECK: %[[V3:.+]] = tosa.rescale %[[V1]] {double_round = false, input_unsigned = false, input_zp = 0 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = -128 : i32, per_channel = false, scale32 = true, shift = array<i8: 33>}
++  // CHECK: %[[V3:.+]] = tosa.rescale %[[V1]], %[[MUL1]], %[[SHIFT1]], %[[ZP0]], %[[ZP2]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: return %[[V3]] : tensor<20x20x!quant.uniform<i8:f32, 1.500000e-01:-128>>
+   %0 = "stablehlo.abs"(%arg0) : (tensor<20x20x!quant.uniform<i8:f32, 0.025:-1>>) -> tensor<20x20x!quant.uniform<i8:f32, 1.5e-01:-128>>
+   return %0 : tensor<20x20x!quant.uniform<i8:f32, 1.5e-01:-128>>
+@@ -99,8 +152,15 @@
+ // CHECK-LABEL: @compareGE
+ func.func @compareGE(%arg0 : tensor<20x20x!quant.uniform<i8:f32, 0.025:-1>>,
+                    %arg1 : tensor<20x20x!quant.uniform<i8:f32, 0.075:-2>>) -> tensor<20x20xi1> {
+-  // CHECK: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 12>}
+-  // CHECK: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -2 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 10>}
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<12>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<10>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<-1> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK-DAG: %[[ZP2:.+]] = "tosa.const"() <{values = dense<-2> : tensor<1xi8>}> : () -> tensor<1xi8>
++  // CHECK: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL1]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT1]], %[[ZP2]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.compare GE, %[[V0]], %[[V1]], TOTALORDER :
+   // CHECK: return %[[V2]]
+   %0 = stablehlo.compare GE, %arg0, %arg1, TOTALORDER : (tensor<20x20x!quant.uniform<i8:f32, 0.025:-1>>, tensor<20x20x!quant.uniform<i8:f32, 0.075:-2>>) -> tensor<20x20xi1>
+@@ -109,12 +169,18 @@
  
- // CHECK-LABEL: @transpose
- func.func @transpose(%arg0: tensor<1x2x3xf32>) -> tensor<3x2x1xf32> {
--  // CHECK: %[[VAR0:.*]] = "tosa.const"() <{value = dense<[2, 1, 0]> : tensor<3xi32>}> : () -> tensor<3xi32>
--  // CHECK: %[[VAR1:.*]] = tosa.transpose %arg0, %[[VAR0]]
-+  // CHECK: %[[VAR0:.*]] = tosa.transpose %arg0 {perms = array<i32: 2, 1, 0>}
-   %0 = "stablehlo.transpose"(%arg0) {permutation = array<i64: 2, 1, 0>} : (tensor<1x2x3xf32>) -> tensor<3x2x1xf32>
-   return %0 : tensor<3x2x1xf32>
+ // -----
+ // CHECK-LABEL: @compareLT
+-func.func @compareLT(%arg0 : tensor<20x20x!quant.uniform<i16:f32, 0.025:-1>>,
+-                   %arg1 : tensor<20x20x!quant.uniform<i16:f32, 0.075:-2>>) -> tensor<20x20xi1> {
+-  // CHECK: %[[V0:.+]] = tosa.rescale %arg0 {double_round = false, input_unsigned = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 17>}
+-  // CHECK: %[[V1:.+]] = tosa.rescale %arg1 {double_round = false, input_unsigned = false, input_zp = -2 : i32, multiplier = array<i32: 1073741824>, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 15>}
++func.func @compareLT(%arg0 : tensor<20x20x!quant.uniform<i16:f32, 0.025:0>>,
++                   %arg1 : tensor<20x20x!quant.uniform<i16:f32, 0.075:0>>) -> tensor<20x20xi1> {
++  // CHECK-DAG: %[[SHIFT0:.+]] = "tosa.const"() <{values = dense<17>
++  // CHECK-DAG: %[[SHIFT1:.+]] = "tosa.const"() <{values = dense<15>
++  // CHECK-DAG: %[[MUL0:.+]] = "tosa.const"() <{values = dense<1073741824> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[MUL1:.+]] = "tosa.const"() <{values = dense<1431655765> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP0:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi32>}> : () -> tensor<1xi32>
++  // CHECK-DAG: %[[ZP1:.+]] = "tosa.const"() <{values = dense<0> : tensor<1xi16>}> : () -> tensor<1xi16>
++  // CHECK: %[[V0:.+]] = tosa.rescale %arg0, %[[MUL1]], %[[SHIFT0]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
++  // CHECK: %[[V1:.+]] = tosa.rescale %arg1, %[[MUL0]], %[[SHIFT1]], %[[ZP1]], %[[ZP0]] {input_unsigned = false, output_unsigned = false, per_channel = false, rounding_mode = "SINGLE_ROUND", scale32 = true}
+   // CHECK: %[[V2:.+]] = stablehlo.compare LT, %[[V0]], %[[V1]], TOTALORDER :
+   // CHECK: return %[[V2]]
+-  %0 = stablehlo.compare LT, %arg0, %arg1, TOTALORDER : (tensor<20x20x!quant.uniform<i16:f32, 0.025:-1>>, tensor<20x20x!quant.uniform<i16:f32, 0.075:-2>>) -> tensor<20x20xi1>
++  %0 = stablehlo.compare LT, %arg0, %arg1, TOTALORDER : (tensor<20x20x!quant.uniform<i16:f32, 0.025:0>>, tensor<20x20x!quant.uniform<i16:f32, 0.075:0>>) -> tensor<20x20xi1>
+   return %0 : tensor<20x20xi1>
  }
-diff --ruN a/stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp b/stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp
---- stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp
-+++ stablehlo/stablehlo/conversions/tosa/transforms/StablehloLegalizeToTosa.cpp
-@@ -458,13 +458,10 @@
-     }
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/tests/legalize_tosa_rescale_to_stablehlo.mlir b/stablehlo/stablehlo/conversions/tosa/tests/legalize_tosa_rescale_to_stablehlo.mlir
+--- stablehlo/stablehlo/conversions/tosa/tests/legalize_tosa_rescale_to_stablehlo.mlir
++++ stablehlo/stablehlo/conversions/tosa/tests/legalize_tosa_rescale_to_stablehlo.mlir
+@@ -3,8 +3,12 @@
+ // -----
+ // CHECK-LABEL: @rescale
+ func.func @rescale(%arg0 : tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>) -> tensor<2x2xi32> {
+-  %0 = tosa.rescale %arg0 {double_round = false, input_zp = -1 : i32, multiplier = array<i32: 1431655765>, input_unsigned = false, output_unsigned = false, output_zp = 0 : i32, per_channel = false, scale32 = true, shift = array<i8: 13>} :
+-            (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>) -> tensor<2x2xi32>
++  %multiplier = "tosa.const"() {values = dense<1431655765> : tensor<1xi32> } : () -> tensor<1xi32>
++  %shift = "tosa.const"() {values = dense<13> : tensor<1xi8> } : () -> tensor<1xi8>
++  %input_zp = "tosa.const"() {values = dense<-1> : tensor<1xi8>} : () -> tensor<1xi8>
++  %output_zp = "tosa.const"() {values = dense<0> : tensor<1xi32>} : () -> tensor<1xi32>
++  %0 = tosa.rescale %arg0, %multiplier, %shift, %input_zp, %output_zp {rounding_mode = "SINGLE_ROUND", input_unsigned = false, output_unsigned = false, per_channel = false, scale32 = true} :
++            (tensor<2x2x!quant.uniform<i8:f32, 0.025:-1>>, tensor<1xi32>, tensor<1xi8>, tensor<1xi8>, tensor<1xi32>) -> tensor<2x2xi32>
  
-     auto perms = op.getPermutation();
--    auto type = RankedTensorType::get({static_cast<int64_t>(perms.size())},
--                                      rewriter.getI32Type());
-     std::vector<int32_t> perms_int32(perms.begin(), perms.end());
--    auto constOp = rewriter.create<tosa::ConstOp>(
--        op->getLoc(), type, DenseIntElementsAttr::get(type, perms_int32));
--    rewriter.replaceOpWithNewOp<tosa::TransposeOp>(op, op.getType(),
--                                                   op.getOperand(), constOp);
-+    rewriter.replaceOpWithNewOp<tosa::TransposeOp>(
-+        op, op.getType(), op.getOperand(),
-+        rewriter.getDenseI32ArrayAttr(perms_int32));
-     return success();
+   // convert input quantized type to storage type
+   // CHECK-DAG: %[[arg:.+]] = stablehlo.bitcast_convert %arg0 : (tensor<2x2x!quant.uniform<i8:f32, 2.500000e-02:-1>>) -> tensor<2x2xi8>
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/tests/lit.cfg.py b/stablehlo/stablehlo/conversions/tosa/tests/lit.cfg.py
+--- stablehlo/stablehlo/conversions/tosa/tests/lit.cfg.py
++++ stablehlo/stablehlo/conversions/tosa/tests/lit.cfg.py
+@@ -26,7 +26,12 @@
+ config.suffixes = ['.mlir']
+ config.test_source_root = os.path.dirname(__file__)
+ # TODO: remove the following once #2751 is fixed.
+-config.excludes = ['legalize_quant_ops_to_tosa_rescale.mlir', 'legalize_tosa_rescale_to_stablehlo.mlir', 'rescale_interpreter.mlir', 'binary.mlir', 'nullary.mlir', 'unary.mlir']
++config.excludes = [
++    'rescale_interpreter.mlir',
++    'binary.mlir',
++    'nullary.mlir',
++    'unary.mlir',
++]
+ 
+ # Disallow reusing variables across CHECK-LABEL matches.
+ # A variable can eschew this (be made "global") by prefixing its name with $.
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/transforms/CMakeLists.txt b/stablehlo/stablehlo/conversions/tosa/transforms/CMakeLists.txt
+--- stablehlo/stablehlo/conversions/tosa/transforms/CMakeLists.txt
++++ stablehlo/stablehlo/conversions/tosa/transforms/CMakeLists.txt
+@@ -25,11 +25,9 @@
+ add_mlir_library(StablehloTOSATransforms
+   StablehloLegalizeToTosa.cpp
+   StablehloPrepareForTosa.cpp
+-  # TODO: un-comment the following once #2751 is fixed.
+-  # StablehloQuantLegalizeToTosaRescale.cpp
+-  # TosaRescaleLegalizeToStablehlo.cpp
++  StablehloQuantLegalizeToTosaRescale.cpp
++  TosaRescaleLegalizeToStablehlo.cpp
+ 
+-  PARTIAL_SOURCES_INTENDED
+   DEPENDS
+   StablehloTOSATransformsPassIncGen
+   StablehloTOSAPDLLPatternsIncGen
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/transforms/Passes.td b/stablehlo/stablehlo/conversions/tosa/transforms/Passes.td
+--- stablehlo/stablehlo/conversions/tosa/transforms/Passes.td
++++ stablehlo/stablehlo/conversions/tosa/transforms/Passes.td
+@@ -33,25 +33,24 @@
+   let dependentDialects = ["::mlir::tosa::TosaDialect"];
+ }
+ 
+-// TODO: un-comment the following once #2751 is fixed.
+-// def StablehloQuantLegalizeToTosaRescalePass : Pass<"stablehlo-quant-legalize-to-tosa-rescale", "mlir::func::FuncOp"> {
+-//   let summary = "Legalize StableHLO Quantized operations to TOSA rescale operations";
+-//   let description = [{
+-//     This pass rewrites StableHLO quantized operations to integer operations
+-//     by inserting TOSA rescale operations at the inputs and outputs of the
+-//     integer operations.
+-//   }];
+-//   let dependentDialects = [
+-//     "::mlir::tosa::TosaDialect",
+-//   ];
+-// }
+-//
+-// def TosaRescaleLegalizeToStablehloPass : Pass<"tosa-rescale-legalize-to-stablehlo", "mlir::func::FuncOp"> {
+-//   let summary = "Legalize TOSA rescales to StableHlo primitive math operations";
+-//   let description = [{
+-//     This pass rewrites TOSA rescale operations to StableHLO primitive math operations.
+-//   }];
+-//   let dependentDialects = [
+-//     "::mlir::stablehlo::StablehloDialect"
+-//   ];
+-// }
++def StablehloQuantLegalizeToTosaRescalePass : Pass<"stablehlo-quant-legalize-to-tosa-rescale", "mlir::func::FuncOp"> {
++  let summary = "Legalize StableHLO Quantized operations to TOSA rescale operations";
++  let description = [{
++    This pass rewrites StableHLO quantized operations to integer operations
++    by inserting TOSA rescale operations at the inputs and outputs of the
++    integer operations.
++  }];
++  let dependentDialects = [
++    "::mlir::tosa::TosaDialect",
++  ];
++}
++
++def TosaRescaleLegalizeToStablehloPass : Pass<"tosa-rescale-legalize-to-stablehlo", "mlir::func::FuncOp"> {
++  let summary = "Legalize TOSA rescales to StableHlo primitive math operations";
++  let description = [{
++    This pass rewrites TOSA rescale operations to StableHLO primitive math operations.
++  }];
++  let dependentDialects = [
++    "::mlir::stablehlo::StablehloDialect"
++  ];
++}
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/transforms/StablehloQuantLegalizeToTosaRescale.cpp b/stablehlo/stablehlo/conversions/tosa/transforms/StablehloQuantLegalizeToTosaRescale.cpp
+--- stablehlo/stablehlo/conversions/tosa/transforms/StablehloQuantLegalizeToTosaRescale.cpp
++++ stablehlo/stablehlo/conversions/tosa/transforms/StablehloQuantLegalizeToTosaRescale.cpp
+@@ -45,13 +45,24 @@
+                    ShapedType outputType, Value inputVal, int32_t multiplier,
+                    int32_t shift, int64_t inputZp, int64_t outputZp,
+                    bool doubleRound, bool scale32, bool perChannel) {
++  auto multiplierVal = getConstTensorInt<int32_t>(rewriter, loc, {multiplier});
++  auto shiftVal =
++      getConstTensorInt<int8_t>(rewriter, loc, static_cast<int8_t>(shift));
++  auto inputZpVal =
++      createZeroPointTensor(rewriter, loc, inputVal.getType(), inputZp);
++  if (!inputZpVal) {
++    (void)emitError(loc,
++                    "Failed to create input zero point tensor for RescaleOp");
++  }
++  auto outputZpVal = createZeroPointTensor(rewriter, loc, outputType, outputZp);
++  if (!outputZpVal) {
++    (void)emitError(loc,
++                    "Failed to create output zero point tensor for RescaleOp");
++  }
+   auto rescale_op = rewriter.create<RescaleOp>(
+-      loc, outputType, inputVal,
+-      rewriter.getI32IntegerAttr(static_cast<int32_t>(inputZp)),
+-      rewriter.getI32IntegerAttr(static_cast<int32_t>(outputZp)),
+-      rewriter.getDenseI32ArrayAttr({multiplier}),
+-      rewriter.getDenseI8ArrayAttr({static_cast<int8_t>(shift)}),
+-      rewriter.getBoolAttr(scale32), rewriter.getBoolAttr(doubleRound),
++      loc, outputType, inputVal, multiplierVal, shiftVal, inputZpVal.value(),
++      outputZpVal.value(), rewriter.getBoolAttr(scale32),
++      rewriter.getStringAttr(doubleRound ? "DOUBLE_ROUND" : "SINGLE_ROUND"),
+       rewriter.getBoolAttr(perChannel),
+       /*input_unsigned=*/rewriter.getBoolAttr(false),
+       /*output_unsigned=*/rewriter.getBoolAttr(false));
+diff --ruN a/stablehlo/stablehlo/conversions/tosa/transforms/TosaRescaleLegalizeToStablehlo.cpp b/stablehlo/stablehlo/conversions/tosa/transforms/TosaRescaleLegalizeToStablehlo.cpp
+--- stablehlo/stablehlo/conversions/tosa/transforms/TosaRescaleLegalizeToStablehlo.cpp
++++ stablehlo/stablehlo/conversions/tosa/transforms/TosaRescaleLegalizeToStablehlo.cpp
+@@ -65,7 +65,7 @@
    }
- };
-diff --ruN a/stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir b/stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir
---- stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir
-+++ stablehlo/stablehlo/tests/transforms/stablehlo_aggressive_simplification.mlir
-@@ -924,6 +924,15 @@
-   // CHECK: %[[RES:.+]] = stablehlo.broadcast_in_dim %arg1, dims = [] : (tensor<f32>) -> tensor<7x2xf32>
-   // CHECK: return %[[RES]]
-   return %0 : tensor<7x2xf32>
-+}
-+
-+// Can't do anything with the dynamic shape, but shouldn't crash.
-+// CHECK-LABEL: @dynamic_pad
-+func.func @dynamic_pad(%arg0: tensor<?x2x3xi1>, %arg1: tensor<i1>) -> tensor<?x2x1xi1> {
-+  %0 = stablehlo.pad %arg0, %arg1, low = [0, 0, -1], high = [0, 0, -1], interior = [0, 0, 0] : (tensor<?x2x3xi1>, tensor<i1>) -> tensor<?x2x1xi1>
-+  // CHECK-NEXT: %[[RES:.+]] = stablehlo.pad %arg0, %arg1, low = [0, 0, -1], high = [0, 0, -1], interior = [0, 0, 0] : (tensor<?x2x3xi1>, tensor<i1>) -> tensor<?x2x1xi1>
-+  // CHECK-NEXT: return %[[RES]]
-+  return %0 : tensor<?x2x1xi1>
- }
  
- // -----
-@@ -1908,6 +1917,19 @@
+   bool scale32 = op.getScale32();
+-  bool doubleRound = op.getDoubleRound();
++  bool doubleRound = op.getRoundingMode() == "DOUBLE_ROUND";
+   bool perChannel = op.getPerChannel();
  
- // -----
+   if (perChannel || doubleRound || !scale32) {
+@@ -106,18 +106,48 @@
+   auto i32Type = inputType.clone(rewriter.getI32Type());
+   auto i64Type = inputType.clone(rewriter.getI64Type());
  
-+// CHECK-LABEL: @side_effecting_custom_call
-+func.func @side_effecting_custom_call(%arg0: tensor<0xf32>) -> (tensor<0xf32>, tensor<0xf32>) {
-+  // CHECK:      %[[CST:.*]] = stablehlo.constant dense<> : tensor<0xf32>
-+  // CHECK-NEXT: %[[CC:.*]] = stablehlo.custom_call @foo(%arg0) {api_version = 0 : i32, has_side_effect = true} : (tensor<0xf32>) -> tensor<0xf32>
-+  %0 = stablehlo.custom_call @foo(%arg0) {api_version = 0 : i32, has_side_effect = true} : (tensor<0xf32>) -> tensor<0xf32>
-+  // CHECK-NOT:  stablehlo.custom_call{{.*}}has_side_effect = false
-+  %1 = stablehlo.custom_call @foo(%arg0) {api_version = 0 : i32, has_side_effect = false} : (tensor<0xf32>) -> tensor<0xf32>
-+  // CHECK: return %[[CC]], %[[CST]]
-+  return %0, %1 : tensor<0xf32>, tensor<0xf32>
-+}
-+
-+// -----
-+
- /////////
- // Generic Shape Ops
- 
-diff --ruN a/stablehlo/stablehlo/transforms/optimization/Passes.h b/stablehlo/stablehlo/transforms/optimization/Passes.h
---- stablehlo/stablehlo/transforms/optimization/Passes.h
-+++ stablehlo/stablehlo/transforms/optimization/Passes.h
-@@ -50,6 +50,13 @@
-                                           MLIRContext *context,
-                                           bool foldFloat = false,
-                                           PatternBenefit benefit = 1);
-+
-+/// Some workloads in XLA import StableHLO from HLO. Since there are a few
-+/// differences in HLO (no implicit captures, lots of tuples, etc.), this
-+/// set of patterns brings the imported HLO back to a more canonical form
-+/// without applying a full set of graph simplifications.
-+void populateStablehloHloImportCanonicalizationPatterns(
-+    MLIRContext *context, RewritePatternSet *patterns);
- }  // namespace stablehlo
- }  // namespace mlir
- 
-diff --ruN a/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp b/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp
---- stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp
-+++ stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplification.cpp
-@@ -934,8 +934,12 @@
-     auto padVal = op.getPaddingValue();
- 
-     auto resultTy = cast<RankedTensorType>(op.getType());
+-  // construct multiplier, shift constant values from op attrs
+-  // for scale32, multiplier is tensor of i32
++  // construct multiplier, shift constant values for scale32, multiplier and
++  // shift are constant tensors of i32 or i8, respectively.
++  DenseElementsAttr multiplierElems;
++  if (!matchPattern(op.getMultiplier(), m_Constant(&multiplierElems))) {
++    return rewriter.notifyMatchFailure(
++        op, "tosa.rescale requires constant multiplier input values");
++  }
++  llvm::SmallVector<int32_t> multiplierValues =
++      llvm::to_vector(multiplierElems.getValues<int32_t>());
+   Value multiplier = getStablehloConstantOp(
+-      rewriter, loc, DenseElementsAttr::get(i32Type, op.getMultiplier()));
++      rewriter, loc,
++      DenseElementsAttr::get(
++          i32Type, rewriter.getI32IntegerAttr(multiplierValues.front())));
++  DenseElementsAttr shiftElems;
++  if (!matchPattern(op.getShift(), m_Constant(&shiftElems))) {
++    return rewriter.notifyMatchFailure(
++        op, "tosa.rescale requires constant shift input values");
++  }
++  llvm::SmallVector<int8_t> shiftValues =
++      llvm::to_vector(shiftElems.getValues<int8_t>());
+   Value shift = getStablehloConstantOp(
+-      rewriter, loc, DenseElementsAttr::get(i8Type, op.getShift()));
 -
--    if (cast<ShapedType>(operand.getType()).getNumElements() != 0)
-+    auto operandTy = cast<RankedTensorType>(operand.getType());
+-  // construct inputZp and outputZp from op attrs
++      rewriter, loc,
++      DenseElementsAttr::get(i8Type,
++                             rewriter.getI8IntegerAttr(shiftValues.front())));
 +
-+    if (!operandTy.hasStaticShape())
-+      return rewriter.notifyMatchFailure(op, "operand shape is dynamic");
-+
-+    if (operandTy.getNumElements() != 0)
-       return rewriter.notifyMatchFailure(op, "operand is not empty tensor");
++  // construct inputZp and outputZp
++  FailureOr<int64_t> maybeIZp = op.getInputZeroPoint();
++  if (failed(maybeIZp)) {
++    return rewriter.notifyMatchFailure(
++        op, "input zero point cannot be statically determined");
++  }
+   Value inputZpI32 = getStablehloConstantOp(
+-      rewriter, loc, DenseElementsAttr::get(i32Type, op.getInputZpAttr()));
++      rewriter, loc,
++      DenseElementsAttr::get(i32Type, rewriter.getI32IntegerAttr(*maybeIZp)));
++  FailureOr<int64_t> maybeOZp = op.getOutputZeroPoint();
++  if (failed(maybeOZp)) {
++    return rewriter.notifyMatchFailure(
++        op, "output zero point cannot be statically determined");
++  }
+   Value outputZpI32 = getStablehloConstantOp(
+-      rewriter, loc, DenseElementsAttr::get(i32Type, op.getOutputZpAttr()));
++      rewriter, loc,
++      DenseElementsAttr::get(i32Type, rewriter.getI32IntegerAttr(*maybeOZp)));
  
-     if (resultTy.hasStaticShape()) {
-@@ -1399,6 +1403,12 @@
-       return rewriter.notifyMatchFailure(op, "not stablehlo");
-     if (isa<ConstantOp>(op))
-       return rewriter.notifyMatchFailure(op, "op is empty constant");
-+
-+    // Skip ops that have memory effects, similar to XLA's zero extent
-+    // simplification, replacing these doesn't save any computation.
-+    auto effectInterface = dyn_cast<MemoryEffectOpInterface>(op);
-+    if (effectInterface && !effectInterface.hasNoEffect())
-+      return rewriter.notifyMatchFailure(op, "op has memory effect");
- 
-     // If the result is a zero-extent tensor, replace the whole op with an empty
-     // constant.
-@@ -1528,6 +1538,12 @@
-             DynamicReshapeOpIsStatic, DynamicIotaIsStatic>(context);
- }
- 
-+void populateStablehloHloImportCanonicalizationPatterns(
-+    MLIRContext *context, RewritePatternSet *patterns) {
-+  patterns->add<TupleIsRepacking, TupleIsUnpacked, WhileOpImplicitCapture>(
-+      context);
-+}
-+
- std::unique_ptr<Pass> createStablehloAggressiveSimplificationPass(
-     GreedyRewriteConfig config) {
-   return std::make_unique<StablehloAggressiveSimplificationPass>(config);
-diff --ruN a/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td b/stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td
---- stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td
-+++ stablehlo/stablehlo/transforms/optimization/StablehloAggressiveSimplificationPatterns.td
-@@ -411,7 +411,7 @@
- // GetTupleElementOp
- 
- // Pattern: get_tuple_element(tuple(X_0, X_1, ...), i) -> X_i
--def : Pat<(StableHLO_GetTupleElementOp (StableHLO_TupleOp:$tuple $operands), $idx),
-+def TupleIsUnpacked : Pat<(StableHLO_GetTupleElementOp (StableHLO_TupleOp:$tuple $operands), $idx),
-           (GetOperandN $tuple, $idx)>;
- 
- ////////
+   // construct constant 1, min and max tensors
+   Value onesI64 = getStablehloConstantOp(rewriter, loc,
 

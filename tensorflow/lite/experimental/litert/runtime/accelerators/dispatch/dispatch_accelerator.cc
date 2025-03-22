@@ -21,7 +21,7 @@
 #include "absl/strings/string_view.h"
 #include "tensorflow/lite/c/c_api_types.h"
 #include "tensorflow/lite/experimental/litert/c/litert_accelerator.h"
-#include "tensorflow/lite/experimental/litert/c/litert_accelerator_options.h"
+#include "tensorflow/lite/experimental/litert/c/litert_accelerator_compilation_options.h"
 #include "tensorflow/lite/experimental/litert/c/litert_accelerator_registration.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_dispatch_delegate.h"
@@ -30,8 +30,8 @@
 #include "tensorflow/lite/experimental/litert/cc/litert_dispatch_delegate.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_expected.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_macros.h"
-#include "tensorflow/lite/experimental/litert/core/accelerator_model_compilation_data.h"
 #include "tensorflow/lite/experimental/litert/core/environment.h"
+#include "tensorflow/lite/experimental/litert/runtime/accelerator_model_compilation_data.h"
 
 namespace litert {
 
@@ -102,16 +102,15 @@ class NpuAccelerator final {
 
   // Goes through the options in the linked list and returns the model
   // compilation data if it exists.
-  static Expected<const litert::ModelCompilationData*> GetModelCompilationData(
-      LiteRtAcceleratorCompilationOptions options) {
-    while (options) {
-      if (options->identifier == litert::ModelCompilationData::kIdentifier) {
-        return reinterpret_cast<litert::ModelCompilationData*>(options);
-      }
-      LiteRtGetNextAcceleratorCompilationOptions(&options);
-    }
-    return Unexpected(kLiteRtStatusErrorNotFound,
-                      "Could not retrieve mode compilation data.");
+  static Expected<const litert::internal::ModelCompilationData*>
+  GetModelCompilationData(LiteRtAcceleratorCompilationOptions options) {
+    LiteRtApiVersion payload_version;
+    void* payload_data;
+    LITERT_RETURN_IF_ERROR(LiteRtFindAcceleratorCompilationOptionsData(
+        options, litert::internal::ModelCompilationData::kIdentifier,
+        &payload_version, &payload_data));
+    return reinterpret_cast<litert::internal::ModelCompilationData*>(
+        payload_data);
   }
 
   // Creates a Dispatch delegate instance.
@@ -127,27 +126,37 @@ class NpuAccelerator final {
                   "Accelerator is not registered to an environment.");
 
     LITERT_ASSIGN_OR_RETURN(
-        const litert::ModelCompilationData* compilation_data,
+        const litert::internal::ModelCompilationData* compilation_data,
         GetModelCompilationData(options));
-    const char* allocation_base = compilation_data->allocation_base;
 
-    LITERT_ENSURE(allocation_base != nullptr, kLiteRtStatusErrorRuntimeFailure,
+    LITERT_ENSURE(compilation_data->allocation_base,
+                  kLiteRtStatusErrorRuntimeFailure,
                   "No model allocation was passed by the runtime.");
 
-    auto dispatch_delegate_options =
-        litert::CreateDispatchDelegateOptionsPtr(*accelerator->env);
+    auto dispatch_delegate_options = litert::CreateDispatchDelegateOptionsPtr(
+        &accelerator->env->GetOptions());
     LITERT_ENSURE(dispatch_delegate_options != nullptr,
                   kLiteRtStatusErrorRuntimeFailure,
                   "Dispatch delegate options failed to be created.");
 
     LITERT_ENSURE(
         LiteRtDispatchDelegateAddAllocBaseOption(
-            dispatch_delegate_options.get(), allocation_base) == kTfLiteOk,
+            dispatch_delegate_options.get(),
+            compilation_data->allocation_base) == kTfLiteOk,
         kLiteRtStatusErrorRuntimeFailure,
         "Could not add allocation base to dispatch delegate options.");
 
+    if (compilation_data->allocation_fd != -1) {
+      LITERT_ENSURE(LiteRtDispatchDelegateAddAllocFdOption(
+                        dispatch_delegate_options.get(),
+                        compilation_data->allocation_fd) == kTfLiteOk,
+                    kLiteRtStatusErrorRuntimeFailure,
+                    "Could not add allocation file descriptor to dispatch "
+                    "delegate options.");
+    }
+
     auto dispatch_delegate = litert::CreateDispatchDelegatePtr(
-        *accelerator->env, std::move(dispatch_delegate_options));
+        &accelerator->env->GetOptions(), std::move(dispatch_delegate_options));
     LITERT_ENSURE(dispatch_delegate != nullptr,
                   kLiteRtStatusErrorRuntimeFailure,
                   "Dispatch delegate failed to be created.");
@@ -194,17 +203,16 @@ LiteRtStatus LiteRtRegisterNpuAccelerator(
   LiteRtAccelerator accelerator_handle;
   LITERT_RETURN_IF_ERROR(LiteRtCreateAccelerator(&accelerator_handle));
   litert::AcceleratorGuard accelerator(accelerator_handle);
+  LITERT_RETURN_IF_ERROR(LiteRtSetAcceleratorGetName(
+      accelerator.get(), litert::NpuAccelerator::GetName));
+  LITERT_RETURN_IF_ERROR(LiteRtSetAcceleratorGetVersion(
+      accelerator.get(), litert::NpuAccelerator::GetVersion));
+  LITERT_RETURN_IF_ERROR(LiteRtSetAcceleratorGetHardwareSupport(
+      accelerator.get(), litert::NpuAccelerator::GetHardwareSupport));
 
-  LiteRtSetAcceleratorGetName(accelerator.get(),
-                              litert::NpuAccelerator::GetName);
-  LiteRtSetAcceleratorGetVersion(accelerator.get(),
-                                 litert::NpuAccelerator::GetVersion);
-  LiteRtSetAcceleratorGetHardwareSupport(
-      accelerator.get(), litert::NpuAccelerator::GetHardwareSupport);
-
-  LiteRtSetDelegateFunction(accelerator.get(),
-                            litert::NpuAccelerator::CreateDelegate,
-                            litert::NpuAccelerator::DestroyDelegate);
+  LITERT_RETURN_IF_ERROR(LiteRtSetDelegateFunction(
+      accelerator.get(), litert::NpuAccelerator::CreateDelegate,
+      litert::NpuAccelerator::DestroyDelegate));
 
   std::string library_folder;
   if (options && options->library_folder) {

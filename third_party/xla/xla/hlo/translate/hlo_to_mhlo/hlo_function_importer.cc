@@ -121,7 +121,8 @@ std::string SanitizeFunctionName(llvm::StringRef name) {
 bool DotIsDefault(const HloInstruction* instruction) {
   // If LHS/RHS has rank greater than 2, not default dot
   const auto& operands = instruction->operands();
-  if (operands[0]->shape().rank() > 2 || operands[1]->shape().rank() > 2) {
+  if (operands[0]->shape().dimensions_size() > 2 ||
+      operands[1]->shape().dimensions_size() > 2) {
     return false;
   }
 
@@ -422,7 +423,7 @@ absl::StatusOr<FuncOp> HloFunctionImporter::ImportAsFunc(
         }
         // NOTE: since we are flattening args, all arguments will share the same
         // location as the tuple parameter instruction.
-        function.getArgument(i).setLoc(
+        function.getArgument(arg_index).setLoc(
             mlir::mhlo::GenerateInstructionLocation(instruction, context_));
         ++arg_index;
       }

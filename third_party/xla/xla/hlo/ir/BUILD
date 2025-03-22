@@ -1,7 +1,7 @@
 # Description:
 #   XLA’s HLO Intermediate Representation implementation.
 
-load("//xla:xla.bzl", "xla_cc_test")
+load("//xla:xla.default.bzl", "xla_cc_test")
 load("//xla/tsl:tsl.bzl", "internal_visibility")
 load("//xla/tsl/platform:rules_cc.bzl", "cc_library")
 
@@ -68,11 +68,13 @@ cc_library(
         "//xla:literal",
         "//xla:literal_pool",
         "//xla:literal_util",
+        "//xla:online_topsort",
         "//xla:printer",
         "//xla:protobuf_util",
         "//xla:shape_layout",
         "//xla:shape_tree",
         "//xla:shape_util",
+        "//xla:side_effect_util",
         "//xla:sort_json",
         "//xla:status_macros",
         "//xla:types",
@@ -126,6 +128,7 @@ xla_cc_test(
     deps = [
         ":hlo",
         "//xla:shape_util",
+        "//xla:side_effect_util",
         "//xla:xla_data_proto_cc",
         "//xla/tsl/platform:test_main",
         "@com_google_googletest//:gtest",
@@ -176,11 +179,13 @@ xla_cc_test(
     deps = [
         ":hlo",
         "//xla:shape_util",
+        "//xla:util",
         "//xla:xla_data_proto_cc",
+        "//xla:xla_proto_cc",
         "//xla/hlo/parser:hlo_parser",
         "//xla/hlo/testlib:filecheck",
+        "//xla/hlo/utils:hlo_query",
         "//xla/service:hlo_module_config",
-        "//xla/tsl/platform:status",
         "//xla/tsl/platform:statusor",
         "//xla/tsl/platform:test",
         "@com_google_absl//absl/hash",
@@ -286,7 +291,7 @@ cc_library(
     ],
 )
 
-cc_test(
+xla_cc_test(
     name = "ptrvec_test",
     srcs = ["ptrvec_test.cc"],
     deps = [

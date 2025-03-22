@@ -28,7 +28,7 @@ litert_cc_lib_with_mtk(
         "neuron_adapter_api.h",
     ],
     tags = [
-        # Don't build/test in OS until qnn is available.
+        # Don't build/test in OS until neuron is available.
         "nobuilder",
         "notap",
     ],
@@ -39,6 +39,6 @@ litert_cc_lib_with_mtk(
         "//tensorflow/lite/experimental/litert/c:litert_common",
         "//tensorflow/lite/experimental/litert/c:litert_logging",
         "//tensorflow/lite/experimental/litert/cc:litert_expected",
-        "//tensorflow/lite/experimental/litert/core:dynamic_loading",
+        "//tensorflow/lite/experimental/litert/cc:litert_shared_library",
     ],
 )

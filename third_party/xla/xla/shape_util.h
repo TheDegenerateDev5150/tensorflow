@@ -114,7 +114,7 @@ class ShapeUtil {
   template <bool kBoundedDynamicOk>
   static inline std::pair<int64_t, bool> ExtentProduct(const Shape& shape) {
     DCHECK(shape.IsArray()) << ShapeUtil::HumanString(shape);
-    DCHECK_EQ(shape.dimensions_size(), shape.rank());
+    DCHECK_EQ(shape.dimensions_size(), shape.dimensions_size());
     int64_t product = 1;
     bool any_overflows = false;
     for (int dim = 0; dim < shape.dimensions_size(); ++dim) {
@@ -169,7 +169,7 @@ class ShapeUtil {
 
   // Returns the number of bytes used to store the primitive_type.
   //
-  // Precondition: shape.IsArray()
+  // Precondition: primitive_type is an array type (otherwise crashes)
   static int64_t ByteSizeOfPrimitiveType(PrimitiveType primitive_type);
 
   // Returns the number of bytes required to store the tuple member pointers for
@@ -304,7 +304,7 @@ class ShapeUtil {
   // Scalar-specific
 
   static bool IsScalar(const Shape& shape) {
-    return shape.IsArray() && shape.rank() == 0;
+    return shape.IsArray() && shape.dimensions_size() == 0;
   }
   static bool IsEffectiveScalar(const Shape& shape) {
     return shape.IsArray() && TrueRank(shape) == 0;
@@ -1058,9 +1058,15 @@ class ShapeUtil {
 
  private:
   // Fills *shape ignoring dynamic dimensions. Returns true on success.
+  // This populates the following fields in the shape:
+  // - sets shape->element_type to element_type,
+  // - sets shape->dimensions to dimensions,
+  // - sets shape->layout.minor_to_major to [ndims - 1, ndims - 2, ..., 0]
+  //   where ndims is the size of dimensions.
   // REQUIRES: *shape is empty.
-  static bool FillNewShape(PrimitiveType element_type,
-                           absl::Span<const int64_t> dimensions, Shape* shape);
+  [[nodiscard]] static bool FillNewShape(PrimitiveType element_type,
+                                         absl::Span<const int64_t> dimensions,
+                                         Shape* shape);
 
   // Helper for ForEachSubshape which visits the subshapes of the given shape in
   // DFS pre-order starting with the index.
@@ -1155,7 +1161,7 @@ inline ShapeUtil::ForEachState::ForEachState(const Shape& s,
       indexes(b.begin(), b.end()),
       indexes_ptr((rank == 0) ? nullptr : indexes.data()),
       indexes_span(indexes) {
-  CHECK_EQ(shape.rank(), b.size());
+  CHECK_EQ(shape.dimensions_size(), b.size());
   CHECK_EQ(i.size(), b.size());
   CHECK_EQ(c.size(), b.size());
 }

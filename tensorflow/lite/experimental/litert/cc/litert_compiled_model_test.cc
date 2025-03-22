@@ -26,6 +26,7 @@
 #include "absl/types/span.h"
 #include "tensorflow/lite/experimental/litert/c/litert_common.h"
 #include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer.h"
+#include "tensorflow/lite/experimental/litert/c/litert_tensor_buffer_types.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_environment.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_model.h"
 #include "tensorflow/lite/experimental/litert/cc/litert_tensor_buffer.h"
@@ -35,13 +36,84 @@
 #include "tensorflow/lite/experimental/litert/test/testdata/simple_model_test_vectors.h"
 
 using ::testing::ElementsAre;
+using ::testing::Eq;
 using testing::FloatNear;
 using testing::Pointwise;
+using ::testing::SizeIs;
 
 namespace litert {
 namespace {
 
 TEST(CompiledModelTest, Basic) {
+  // Environment setup.
+  LITERT_ASSERT_OK_AND_ASSIGN(Environment env, litert::Environment::Create({}));
+
+  // Create Model.
+  Model model = testing::LoadTestFileModel(kModelFileName);
+  ASSERT_TRUE(model);
+
+  // Create CompiledModel.
+  LITERT_ASSERT_OK_AND_ASSIGN(CompiledModel compiled_model,
+                              CompiledModel::Create(env, model));
+
+  // Check CompiledModel buffer requirements.
+  // input and output expect host memory.
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      TensorBufferRequirements input_buffer_requirements_arg0,
+      compiled_model.GetInputBufferRequirements(/*input_name=*/"arg0"));
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      std::vector<LiteRtTensorBufferType> input_buffer_types_arg0,
+      input_buffer_requirements_arg0.SupportedTypes());
+  EXPECT_THAT(input_buffer_types_arg0,
+              ElementsAre(kLiteRtTensorBufferTypeHostMemory));
+
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      TensorBufferRequirements input_buffer_requirements_arg1,
+      compiled_model.GetInputBufferRequirements(/*input_name=*/"arg1"));
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      std::vector<LiteRtTensorBufferType> input_buffer_types_arg1,
+      input_buffer_requirements_arg1.SupportedTypes());
+  EXPECT_THAT(input_buffer_types_arg1,
+              ElementsAre(kLiteRtTensorBufferTypeHostMemory));
+
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      TensorBufferRequirements output_buffer_requirements,
+      compiled_model.GetOutputBufferRequirements(/*output_name=*/"tfl.add"));
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      std::vector<LiteRtTensorBufferType> output_buffer_types,
+      output_buffer_requirements.SupportedTypes());
+  EXPECT_THAT(output_buffer_types,
+              ElementsAre(kLiteRtTensorBufferTypeHostMemory));
+
+  // Create and fill input and output buffers.
+  LITERT_ASSERT_OK_AND_ASSIGN(std::vector<TensorBuffer> input_buffers,
+                              compiled_model.CreateInputBuffers());
+
+  LITERT_ASSERT_OK_AND_ASSIGN(std::vector<TensorBuffer> output_buffers,
+                              compiled_model.CreateOutputBuffers());
+
+  ASSERT_TRUE(input_buffers[0].Write<float>(
+      absl::MakeConstSpan(kTestInput0Tensor, kTestInput0Size)));
+  ASSERT_TRUE(input_buffers[1].Write<float>(
+      absl::MakeConstSpan(kTestInput1Tensor, kTestInput1Size)));
+
+  // Execute model with input and output buffers.
+  compiled_model.Run(input_buffers, output_buffers);
+
+  // Check model output.
+  {
+    LITERT_ASSERT_OK_AND_ASSIGN(
+        auto lock_and_addr,
+        litert::TensorBufferScopedLock::Create<const float>(output_buffers[0]));
+    auto output = absl::MakeSpan(lock_and_addr.second, kTestOutputSize);
+    for (auto i = 0; i < kTestOutputSize; ++i) {
+      ABSL_LOG(INFO) << "Result: " << output[i] << "\t" << kTestOutputTensor[i];
+    }
+    EXPECT_THAT(output, Pointwise(FloatNear(1e-5), kTestOutputTensor));
+  }
+}
+
+TEST(CompiledModelTest, BasicSignatureIndex) {
   // Environment setup.
   LITERT_ASSERT_OK_AND_ASSIGN(Environment env, litert::Environment::Create({}));
 
@@ -217,6 +289,64 @@ TEST(CompiledModelTest, RunWithInputOutputMap) {
     LITERT_ASSERT_OK_AND_ASSIGN(
         auto lock_and_addr, litert::TensorBufferScopedLock::Create<const float>(
                                 output_map["tfl.add"]));
+    auto output = absl::MakeSpan(lock_and_addr.second, kTestOutputSize);
+    for (auto i = 0; i < kTestOutputSize; ++i) {
+      ABSL_LOG(INFO) << "Result: " << output[i] << "\t" << kTestOutputTensor[i];
+    }
+    EXPECT_THAT(output, Pointwise(FloatNear(1e-5), kTestOutputTensor));
+  }
+}
+
+// Tests Compiled Model async API on CPU. In the CPU case, the async API should
+// always return false.
+TEST(CompiledModelTest, RunAsyncReturnsFalse) {
+  // Environment setup.
+  LITERT_ASSERT_OK_AND_ASSIGN(Environment env, litert::Environment::Create({}));
+
+  // Create Model and check signatures.
+  Model model = testing::LoadTestFileModel(kModelFileName);
+  ASSERT_TRUE(model);
+
+  // Create CompiledModel.
+  LITERT_ASSERT_OK_AND_ASSIGN(CompiledModel compiled_model,
+                              CompiledModel::Create(env, model));
+
+  // Create input and output buffers.
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      std::vector<TensorBuffer> input_buffers,
+      compiled_model.CreateInputBuffers(model.DefaultSignatureKey()));
+  LITERT_ASSERT_OK_AND_ASSIGN(
+      std::vector<TensorBuffer> output_buffers,
+      compiled_model.CreateOutputBuffers(model.DefaultSignatureKey()));
+
+  // Confirm input and output buffers are host memory.
+  EXPECT_THAT(*input_buffers[0].BufferType(),
+              Eq(kLiteRtTensorBufferTypeHostMemory));
+  EXPECT_THAT(*input_buffers[1].BufferType(),
+              Eq(kLiteRtTensorBufferTypeHostMemory));
+  EXPECT_THAT(*output_buffers[0].BufferType(),
+              Eq(kLiteRtTensorBufferTypeHostMemory));
+
+  ASSERT_THAT(input_buffers, SizeIs(2));
+  ASSERT_THAT(output_buffers, SizeIs(1));
+
+  ASSERT_TRUE(input_buffers[0].Write<float>(
+      absl::MakeConstSpan(kTestInput0Tensor, kTestInput0Size)));
+  ASSERT_TRUE(input_buffers[1].Write<float>(
+      absl::MakeConstSpan(kTestInput1Tensor, kTestInput1Size)));
+
+  // Execute model with input and output buffers.
+  bool async;
+  compiled_model.RunAsync(model.DefaultSignatureKey(), input_buffers,
+                          output_buffers, async);
+  // Since there are no events on the output buffers, async should be false.
+  ASSERT_FALSE(async);
+
+  // Check model output.
+  {
+    LITERT_ASSERT_OK_AND_ASSIGN(
+        auto lock_and_addr,
+        litert::TensorBufferScopedLock::Create<const float>(output_buffers[0]));
     auto output = absl::MakeSpan(lock_and_addr.second, kTestOutputSize);
     for (auto i = 0; i < kTestOutputSize; ++i) {
       ABSL_LOG(INFO) << "Result: " << output[i] << "\t" << kTestOutputTensor[i];

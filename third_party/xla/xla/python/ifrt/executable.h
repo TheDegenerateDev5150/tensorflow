@@ -23,6 +23,7 @@ limitations under the License.
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -125,7 +126,7 @@ struct ExecuteOptions {
   // Execution stream ID identifies the series of executions that must be
   // executed in program order.  Executions with different execution stream IDs
   // may be executed in any order and concurrently.
-  uint64_t execution_stream_id = 0;
+  int64_t execution_stream_id = 0;
 
   // Custom execution options specific to the runtime. The user and the runtime
   // are responsible for ensuring version compatibility.
@@ -184,6 +185,13 @@ class LoadedExecutable
   // Returns a list of parameter Sharding.
   virtual std::optional<std::vector<OpSharding>> GetParameterShardings()
       const = 0;
+
+  // Returns the indices of parameters that will be donated whenever `Execute`
+  // gets called, provided they are not present in
+  // `execute_options.non_donatable_input_indices`.
+  virtual absl::StatusOr<absl::Span<const int>> GetDonatableInputIndices()
+      const = 0;
+
   // Returns a list of output OpSharding.
   virtual std::optional<std::vector<OpSharding>> GetOutputShardings() const = 0;
   // Returns a list of parameter layouts.

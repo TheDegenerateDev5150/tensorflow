@@ -1692,7 +1692,7 @@ void LiteralBase::Piece::SerializeData(
            primitive_util::NativeToPrimitiveType<NativeT>());
   if (subshape().is_dynamic()) {
     absl::Span<const DynamicSizeType> sizes(dynamic_size_buffer(),
-                                            subshape().rank());
+                                            subshape().dimensions_size());
     state.WriteDynamicSizes(sizes);
   }
   state.WriteElements(data<NativeT>());
@@ -1704,7 +1704,8 @@ bool LiteralBase::Piece::DeserializeData(
   CHECK_EQ(subshape().element_type(),
            primitive_util::NativeToPrimitiveType<NativeT>());
   if (subshape().is_dynamic()) {
-    absl::Span<DynamicSizeType> sizes(dynamic_size_buffer(), subshape().rank());
+    absl::Span<DynamicSizeType> sizes(dynamic_size_buffer(),
+                                      subshape().dimensions_size());
     if (!state.ReadDynamicSizes(sizes)) {
       return false;
     }
@@ -1964,10 +1965,10 @@ TF_ATTRIBUTE_NOINLINE void LiteralBase::EachCell(
   if (ShapeUtil::IsZeroElementArray(shape())) {
     return;
   }
-  std::vector<int64_t> indices(shape().rank(), 0);
+  std::vector<int64_t> indices(shape().dimensions_size(), 0);
 
   Shape shape_dynamic = shape();
-  for (int64_t i = 0; i < shape_dynamic.rank(); ++i) {
+  for (int64_t i = 0; i < shape_dynamic.dimensions_size(); ++i) {
     shape_dynamic.set_dimensions(i, GetDynamicSize(i));
   }
   do {
@@ -1984,9 +1985,9 @@ TF_ATTRIBUTE_NOINLINE void MutableLiteralBase::MutableEachCell(
   if (ShapeUtil::IsZeroElementArray(shape())) {
     return;
   }
-  std::vector<int64_t> indices(shape().rank(), 0);
+  std::vector<int64_t> indices(shape().dimensions_size(), 0);
   Shape shape_dynamic = shape();
-  for (int64_t i = 0; i < shape_dynamic.rank(); ++i) {
+  for (int64_t i = 0; i < shape_dynamic.dimensions_size(); ++i) {
     shape_dynamic.set_dimensions(i, GetDynamicSize(i));
   }
   do {
@@ -1999,7 +2000,7 @@ TF_ATTRIBUTE_NOINLINE void MutableLiteralBase::PopulateR1(
     absl::Span<const NativeT> values) {
   CHECK(LayoutUtil::IsDenseArray(shape()))
       << __func__ << " is only supported for dense arrays: " << shape();
-  CHECK_EQ(shape().rank(), 1);
+  CHECK_EQ(shape().dimensions_size(), 1);
   if (shape().is_static()) {
     CHECK_EQ(ShapeUtil::ElementsIn(shape()), values.size());
   } else {
@@ -2016,7 +2017,7 @@ TF_ATTRIBUTE_NOINLINE void MutableLiteralBase::PopulateR2(
     std::initializer_list<std::initializer_list<NativeT>> values) {
   CHECK(LayoutUtil::IsDenseArray(shape()))
       << __func__ << " is only supported for dense arrays: " << shape();
-  CHECK_EQ(shape().rank(), 2);
+  CHECK_EQ(shape().dimensions_size(), 2);
   CHECK_EQ(shape().element_type(),
            primitive_util::NativeToPrimitiveType<NativeT>());
 
@@ -2052,7 +2053,7 @@ TF_ATTRIBUTE_NOINLINE void MutableLiteralBase::PopulateFromArray(
   CHECK(shape().IsArray());
   CHECK_EQ(shape().element_type(),
            primitive_util::NativeToPrimitiveType<NativeT>());
-  CHECK_EQ(shape().rank(), values.num_dimensions());
+  CHECK_EQ(shape().dimensions_size(), values.num_dimensions());
   for (int dim = 0; dim < values.num_dimensions(); ++dim) {
     int64_t shape_size = shape().is_dynamic_dimension(dim)
                              ? GetDynamicSize(dim)

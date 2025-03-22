@@ -172,6 +172,45 @@ void Dump(LiteRtOpCode code, std::ostream& out) {
     case kLiteRtOpCodeTflQuantize:
       out << "TFL_QUANTIZE";
       break;
+    case kLiteRtOpCodeTflLeakyRelu:
+      out << "TFL_LEAKY_RELU";
+      break;
+    case kLiteRtOpCodeTflHardSwish:
+      out << "TFL_HARD_SWISH";
+      break;
+    case kLiteRtOpCodeTflAveragePool2d:
+      out << "AVERAGE_POOL_2D";
+      break;
+    case kLiteRtOpCodeTflDepthwiseConv2d:
+      out << "DEPTHWISE_CONV_2D";
+      break;
+    case kLiteRtOpCodeTflSpaceToDepth:
+      out << "SPACE_TO_DEPTH";
+      break;
+    case kLiteRtOpCodeTflDepthToSpace:
+      out << "DEPTH_TO_SPACE";
+      break;
+    case kLiteRtOpCodeTflConv2d:
+      out << "CONV_2D";
+      break;
+    case kLiteRtOpCodeTflResizeBilinear:
+      out << "RESIZE_BILINEAR";
+      break;
+    case kLiteRtOpCodeTflMinimum:
+      out << "MINIMUM";
+      break;
+    case kLiteRtOpCodeTflMaximum:
+      out << "MAXIMUM";
+      break;
+    case kLiteRtOpCodeTflResizeNearestNeighbor:
+      out << "RESIZE_NEAREST_NEIGHBOR";
+      break;
+    case kLiteRtOpCodeTflRelu:
+      out << "TFL_RELU";
+      break;
+    case kLiteRtOpCodeTflRelu6:
+      out << "TFL_RELU6";
+      break;
     default:
       out << "UKNOWN_OP_CODE: " << code;
       break;
@@ -278,14 +317,13 @@ void Dump(const CompilerPlugin& plugin, std::ostream& out) {
   out << "}\n";
 }
 
-
 void Dump(const LiteRtModelT& model, std::ostream& out) {
   out << absl::StreamFormat("LiteRtModel : [ #subgraphs=%d ]\n",
                             model.Subgraphs().size());
 }
 
 void DumpOptions(const LiteRtOpT& op, std::ostream& out) {
-  auto& opts = detail::GetTflOptions(op);
+  auto& opts = litert::internal::GetTflOptions(op);
   if (opts.value == nullptr) {
     out << "null options\n";
     return;
